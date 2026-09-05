@@ -112,6 +112,17 @@ class EnvConfig:
     agree. See the README.
     """
 
+    email_from: str
+    """The SES-verified sender for this environment's transactional mail.
+
+    Written into EMAIL_FROM, which the backend requires: without it SES rejects
+    every message, the service swallows the rejection by design, and the symptom
+    is silence. The address has to be verified in SES before it will send, and
+    SES starts every account in the sandbox, where it also only delivers to
+    verified *recipients* - so staging reaches the team and nobody else until
+    production access is granted.
+    """
+
     stopped_when_idle: bool
     """Staging is powered down outside active testing (see scripts/staging_power.py).
 
@@ -147,6 +158,9 @@ STAGING = EnvConfig(
         TestUser(name="customer", email="e2e-customer@example.com"),
         TestUser(name="admin", email="e2e-admin@example.com", admin=True),
     ),
+    # Replace once the company domain exists; until then this must be an address
+    # verified by hand in SES, or the service will not boot.
+    email_from="orders@oasisbiofarm.net",
     stopped_when_idle=True,
 )
 
@@ -165,6 +179,7 @@ PROD = EnvConfig(
     stripe_mode="live",
     # Deliberately empty. See TestUser.
     test_users=(),
+    email_from="orders@oasisbiofarm.net",
     stopped_when_idle=False,
 )
 

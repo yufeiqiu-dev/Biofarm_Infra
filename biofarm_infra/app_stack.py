@@ -202,6 +202,25 @@ class AppStack(cdk.Stack):
         for parameter in data.stripe_parameters.values():
             parameter.grant_read(role)
 
+        # Sending only, and only as this environment's own sender.
+        #
+        # ses:SendEmail with a wildcard resource lets a compromised container
+        # send as any identity in the account, which for a domain identity is
+        # every address at the company. The condition pins the From address to
+        # the one this environment is configured with, so a staging container
+        # cannot send mail that appears to come from production.
+        role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["ses:SendEmail", "ses:SendRawEmail"],
+                resources=[
+                    f"arn:aws:ses:{self.region}:{self.account}:identity/*",
+                ],
+                conditions={
+                    "StringEquals": {"ses:FromAddress": cfg.email_from},
+                },
+            )
+        )
+
         return role
 
     # --- network path ---
@@ -256,6 +275,11 @@ class AppStack(cdk.Stack):
             "CLOUDFRONT_URL": f"https://{data.distribution.distribution_domain_name}",
             # Filled in on the second deploy, once Amplify has a domain.
             "CORS_ORIGINS": '["http://localhost:5174"]',
+            # False in both environments. The backend refuses to boot with it on
+            # under APP_ENV=prod, which is what staging runs, and a store that
+            # charges a card and never says so is not a working store.
+            "EMAIL_BYPASS": "false",
+            "EMAIL_FROM": cfg.email_from,
         }
         return [
             apprunner.CfnService.KeyValuePairProperty(name=name, value=value)

@@ -144,6 +144,15 @@ Then, before the service can become healthy:
    against the service URL from the stack output. Put the signing secret it gives
    you into that environment's `stripe-webhook-secret` parameter.
 4. **Set `CORS_ORIGINS`** to the frontend origin and deploy again.
+4b. **Verify the sender in SES.** `EMAIL_FROM` is set from `config.py` and the
+   backend refuses to boot without it, but SES will not send from an identity it
+   has not verified. Verify the address (or the domain, once it exists) in the
+   SES console for the same region.
+
+   Note what sandbox means: a new account can only send *to* verified addresses
+   as well, so staging reaches the team and nobody else. Production needs
+   sending access requested from AWS, which is a support ticket and is not
+   instant - worth starting before you need it.
 5. **Console:** add the Amplify branch URL to the Cognito app client's callback
    and sign-out URLs, or sign-in fails at the redirect with an error page from
    Cognito rather than from this application.
@@ -179,7 +188,7 @@ explicitly.
 
 ## Status
 
-All five stacks are built, with 134 tests, all offline.
+All five stacks are built, with 138 tests, all offline.
 
 Still to come: the `staging` branches and CI workflows in the application
 repositories, and the Playwright suite that signs in as the seeded accounts.

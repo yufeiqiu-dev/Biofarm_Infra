@@ -229,3 +229,53 @@ def test_an_unsupported_retention_is_refused_rather_than_defaulted():
 
     with _pytest.raises(ValueError, match="does not accept"):
         log_retention(11)
+
+
+# --- transactional email ---
+
+def _instance_role_statements(template) -> list[dict]:
+    """Policy statements attached to the App Runner instance role."""
+    statements = []
+    for policy in template.find_resources("AWS::IAM::Policy").values():
+        statements.extend(policy["Properties"]["PolicyDocument"]["Statement"])
+    return statements
+
+
+def _ses_statements(template) -> list[dict]:
+    out = []
+    for statement in _instance_role_statements(template):
+        actions = statement.get("Action", [])
+        actions = actions if isinstance(actions, list) else [actions]
+        if any(str(a).startswith("ses:") for a in actions):
+            out.append(statement)
+    return out
+
+
+@pytest.mark.parametrize("cfg", ENVIRONMENTS, ids=lambda c: c.name)
+def test_the_backend_can_send_its_own_mail_and_nobody_elses(templates, cfg):
+    """A wildcard ses:SendEmail lets a compromised container send as any
+    identity in the account - for a domain identity, every address at the
+    company. The From address is pinned instead, so staging cannot send mail
+    that appears to come from production."""
+    statements = _ses_statements(templates[f"Biofarm-App-{cfg.name}"])
+    assert statements, "the instance role cannot send email at all"
+
+    for statement in statements:
+        condition = statement.get("Condition", {})
+        pinned = condition.get("StringEquals", {}).get("ses:FromAddress")
+        assert pinned == cfg.email_from, statement
+
+
+@pytest.mark.parametrize("cfg", ENVIRONMENTS, ids=lambda c: c.name)
+def test_neither_environment_runs_with_email_bypassed(templates, cfg):
+    """The backend refuses to boot with it on under APP_ENV=prod, which both
+    environments run - so this failing means a deploy that will not start."""
+    template = templates[f"Biofarm-App-{cfg.name}"]
+    service = list(template.find_resources("AWS::AppRunner::Service").values())[0]
+    env = service["Properties"]["SourceConfiguration"]["ImageRepository"][
+        "ImageConfiguration"
+    ]["RuntimeEnvironmentVariables"]
+    values = {pair["Name"]: pair["Value"] for pair in env}
+
+    assert values["EMAIL_BYPASS"] == "false"
+    assert values["EMAIL_FROM"] == cfg.email_from
