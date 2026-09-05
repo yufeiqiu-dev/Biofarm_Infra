@@ -11,6 +11,17 @@
     ]
   },
   "context": {
+    "//": [
+      "defaultCrossStackReferences is set explicitly rather than left to default.",
+      "DataStack exports the security group and database that AppStack consumes.",
+      "'strong' means CloudFormation refuses to delete an exported resource while",
+      "another stack still references it - so a careless change to DataStack cannot",
+      "quietly break production's App Runner service. The cost is refactoring",
+      "friction: moving a resource between stacks needs the consumer updated and",
+      "deployed first. That trade is the right way round for a system holding",
+      "customer orders."
+    ],
+    "@aws-cdk/core:defaultCrossStackReferences": "strong",
     "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
     "@aws-cdk/core:checkSecretUsage": true,
     "@aws-cdk/aws-iam:minimizePolicies": true,

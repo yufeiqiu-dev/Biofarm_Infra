@@ -62,6 +62,18 @@ class EnvConfig:
 
     log_retention_days: int
 
+    stripe_mode: str
+    """"test" or "live", passed to the backend as STRIPE_MODE.
+
+    The backend refuses to start if STRIPE_SECRET_KEY is from the other mode.
+    Staging runs test mode with STRIPE_BYPASS=false, so it exercises the real
+    webhook, capture and refund paths without money moving.
+
+    Note that Stripe webhook endpoints are per-mode: each environment needs its
+    own endpoint created in the matching mode, and each issues its own signing
+    secret. They are not interchangeable.
+    """
+
     stopped_when_idle: bool
     """Staging is powered down outside active testing (see scripts/staging_power.py).
 
@@ -92,6 +104,7 @@ STAGING = EnvConfig(
     apprunner_cpu="0.25 vCPU",
     apprunner_memory="0.5 GB",
     log_retention_days=7,
+    stripe_mode="test",
     stopped_when_idle=True,
 )
 
@@ -107,6 +120,7 @@ PROD = EnvConfig(
     apprunner_cpu="0.25 vCPU",
     apprunner_memory="0.5 GB",
     log_retention_days=30,
+    stripe_mode="live",
     stopped_when_idle=False,
 )
 

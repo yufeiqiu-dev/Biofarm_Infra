@@ -16,6 +16,7 @@ can build the same tree and assert against it without synthesizing to disk.
 import aws_cdk as cdk
 
 from biofarm_infra.cicd_stack import CicdStack
+from biofarm_infra.data_stack import DataStack
 from biofarm_infra.network_stack import NetworkStack
 from config import ENVIRONMENTS
 
@@ -45,13 +46,15 @@ def build_app(env: cdk.Environment | None = None) -> cdk.App:
 
     # One VPC for every environment. See network_stack.py for what that costs
     # and what is done to make it safe.
-    NetworkStack(app, "Biofarm-Network", env=aws_env)
+    network = NetworkStack(app, "Biofarm-Network", env=aws_env)
 
-    for _cfg in ENVIRONMENTS:
-        # Per-environment stacks are added here as they are built. Tags go on
-        # each stack rather than on the app - tagging the app inside this loop
-        # would leave every stack carrying whichever environment it ended on.
-        pass
+    for cfg in ENVIRONMENTS:
+        data = DataStack(
+            app, f"Biofarm-Data-{cfg.name}", network=network, cfg=cfg, env=aws_env
+        )
+        # Tags go on the stack, not the app: tagging the app from inside this
+        # loop would leave every stack carrying whichever environment it ended on.
+        cdk.Tags.of(data).add("Environment", cfg.name)
 
     cdk.Tags.of(app).add("Project", "Biofarm")
     cdk.Tags.of(app).add("ManagedBy", "cdk")
