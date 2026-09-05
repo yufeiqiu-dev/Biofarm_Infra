@@ -20,16 +20,15 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from app import build_app  # noqa: E402
 
-# A fixed account and region. Some constructs behave differently for an
-# environment-agnostic stack - VPC availability zones become tokens rather than
-# concrete names - and assertions against tokens test nothing.
-TEST_ENV = cdk.Environment(account="111122223333", region="us-east-2")
-
-
 @pytest.fixture(scope="session")
-def synthesized() -> cdk.assertions.Template | None:
-    """The whole app, built once."""
-    return build_app(env=TEST_ENV)
+def synthesized():
+    """The whole app, built once.
+
+    Environment-agnostic, matching how it is deployed. Pinning an account here
+    would make CDK resolve availability zones by calling EC2, so the tests would
+    need credentials and a network to run.
+    """
+    return build_app()
 
 
 @pytest.fixture(scope="session")
