@@ -38,6 +38,34 @@ from config import EnvConfig
 
 CONTAINER_PORT = "8000"
 
+# CloudWatch only accepts a fixed set of retention periods, and CDK names them in
+# words rather than numbers. Looking the enum up by a constructed attribute name
+# silently returned None for every value and fell through to a default, so the
+# per-environment setting did nothing at all - staging kept a month of logs it was
+# configured not to keep. An explicit map, and a KeyError rather than a fallback,
+# because that is precisely what hid the bug.
+LOG_RETENTION = {
+    1: logs.RetentionDays.ONE_DAY,
+    3: logs.RetentionDays.THREE_DAYS,
+    5: logs.RetentionDays.FIVE_DAYS,
+    7: logs.RetentionDays.ONE_WEEK,
+    14: logs.RetentionDays.TWO_WEEKS,
+    30: logs.RetentionDays.ONE_MONTH,
+    60: logs.RetentionDays.TWO_MONTHS,
+    90: logs.RetentionDays.THREE_MONTHS,
+    365: logs.RetentionDays.ONE_YEAR,
+}
+
+
+def log_retention(days: int) -> logs.RetentionDays:
+    try:
+        return LOG_RETENTION[days]
+    except KeyError:
+        raise ValueError(
+            f"CloudWatch does not accept a {days}-day retention. "
+            f"Valid values here: {sorted(LOG_RETENTION)}"
+        ) from None
+
 # The readiness endpoint, which runs SELECT 1. Pointing App Runner at the shallow
 # /health instead would keep a service with a dead database in rotation, which is
 # the exact thing splitting the two endpoints was for.
@@ -282,9 +310,7 @@ class AppStack(cdk.Stack):
             command=["python", "-m", "app.jobs.cleanup"],
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="cleanup",
-                log_retention=getattr(
-                    logs.RetentionDays, f"_{cfg.log_retention_days}_DAYS", logs.RetentionDays.ONE_MONTH
-                ),
+                log_retention=log_retention(cfg.log_retention_days),
             ),
             environment={
                 "DB_HOST": data.database.db_instance_endpoint_address,

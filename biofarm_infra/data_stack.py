@@ -102,6 +102,13 @@ class DataStack(cdk.Stack):
         self.database = rds.DatabaseInstance(
             self,
             "Database",
+            # Named explicitly. Left to CloudFormation the identifier is
+            # generated from the logical id and a random suffix, which is
+            # unrecognisable in the console and - more to the point - cannot be
+            # found by scripts/staging_power.py, whose whole job is to locate and
+            # stop this instance. It would have reported "not found" and left the
+            # database running, which is a silent bill rather than an error.
+            instance_identifier=f"{cfg.resource_prefix}-db",
             engine=rds.DatabaseInstanceEngine.postgres(version=POSTGRES_VERSION),
             instance_type=ec2.InstanceType(cfg.db_instance_class),
             vpc=network.vpc,

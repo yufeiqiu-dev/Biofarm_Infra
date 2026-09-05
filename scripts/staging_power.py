@@ -26,9 +26,10 @@ import sys
 import boto3
 from botocore.exceptions import ClientError
 
-# Matches EnvConfig.resource_prefix for staging. Kept as a literal rather than
-# imported so this script stays runnable without the CDK dependencies installed.
-DB_IDENTIFIER_PREFIX = "biofarm-staging"
+# Matches what DataStack and AppStack name these. Kept as literals rather than
+# imported so this script runs without the CDK dependencies installed - at the
+# cost of having to change in two places, which the tests assert against.
+DB_IDENTIFIER = "biofarm-staging-db"
 SERVICE_NAME = "biofarm-staging-backend"
 
 # RDS states in which a request would be rejected. Reported rather than retried:
@@ -42,11 +43,11 @@ def _clients(profile: str | None, region: str | None):
 
 
 def _find_database(rds) -> dict | None:
-    """Located by identifier prefix, because CloudFormation appends a suffix."""
+    """Located by the identifier DataStack sets explicitly."""
     paginator = rds.get_paginator("describe_db_instances")
     for page in paginator.paginate():
         for instance in page["DBInstances"]:
-            if instance["DBInstanceIdentifier"].startswith(DB_IDENTIFIER_PREFIX):
+            if instance["DBInstanceIdentifier"] == DB_IDENTIFIER:
                 return instance
     return None
 
@@ -77,57 +78,61 @@ def status(rds, apprunner) -> int:
     return 0 if database and service else 1
 
 
-def _set_database(rds, want_running: bool) -> None:
+def _set_database(rds, want_running: bool) -> bool:
     database = _find_database(rds)
     if database is None:
-        print("database:    not found, skipping")
-        return
+        print(f"database:    {DB_IDENTIFIER} not found", file=sys.stderr)
+        return False
 
     identifier = database["DBInstanceIdentifier"]
     state = database["DBInstanceStatus"]
 
     if state in DB_BUSY_STATES:
         print(f"database:    {state} already - leaving it alone")
-        return
+        return True
 
     target = "available" if want_running else "stopped"
     if state == target:
         print(f"database:    already {state}")
-        return
+        return True
 
     action = rds.start_db_instance if want_running else rds.stop_db_instance
     try:
         action(DBInstanceIdentifier=identifier)
         print(f"database:    {'starting' if want_running else 'stopping'} {identifier}")
+        return True
     except ClientError as error:
         print(f"database:    {error.response['Error']['Message']}", file=sys.stderr)
+        return False
 
 
-def _set_service(apprunner, want_running: bool) -> None:
+def _set_service(apprunner, want_running: bool) -> bool:
     service = _find_service(apprunner)
     if service is None:
-        print("app runner:  not found, skipping")
-        return
+        print(f"app runner:  {SERVICE_NAME} not found", file=sys.stderr)
+        return False
 
     arn = service["ServiceArn"]
     state = service["Status"]
 
     if want_running and state == "RUNNING":
         print("app runner:  already running")
-        return
+        return True
     if not want_running and state == "PAUSED":
         print("app runner:  already paused")
-        return
+        return True
     if state in {"OPERATION_IN_PROGRESS", "CREATE_FAILED", "DELETED"}:
         print(f"app runner:  {state.lower()} - leaving it alone")
-        return
+        return True
 
     action = apprunner.resume_service if want_running else apprunner.pause_service
     try:
         action(ServiceArn=arn)
         print(f"app runner:  {'resuming' if want_running else 'pausing'} {SERVICE_NAME}")
+        return True
     except ClientError as error:
         print(f"app runner:  {error.response['Error']['Message']}", file=sys.stderr)
+        return False
 
 
 def main() -> int:
@@ -148,16 +153,20 @@ def main() -> int:
     # check runs SELECT 1, so a service resumed against a stopped database fails
     # readiness and can be marked unhealthy before the database catches up.
     if want_running:
-        _set_database(rds, True)
-        _set_service(apprunner, True)
+        ok = _set_database(rds, True)
+        ok = _set_service(apprunner, True) and ok
     else:
-        _set_service(apprunner, False)
-        _set_database(rds, False)
+        ok = _set_service(apprunner, False)
+        ok = _set_database(rds, False) and ok
 
     print("\nBoth operations are asynchronous; run `status` to see when they finish.")
     if not want_running:
         print("Note: AWS force-starts a stopped RDS instance after 7 days.")
-    return 0
+
+    # Non-zero when something could not be found or acted on. Printing the
+    # problem and exiting 0 would make `down` look like it worked while the
+    # database kept running - a silent bill rather than a visible failure.
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

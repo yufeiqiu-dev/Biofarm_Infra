@@ -20,7 +20,7 @@ import staging_power  # noqa: E402
 
 
 class FakeRds:
-    def __init__(self, status: str = "available", identifier: str = "biofarm-staging-db-abc"):
+    def __init__(self, status: str = "available", identifier: str = staging_power.DB_IDENTIFIER):
         self.instances = (
             [{"DBInstanceIdentifier": identifier, "DBInstanceStatus": status}] if status else []
         )
@@ -84,7 +84,7 @@ def test_down_stops_both():
     staging_power._set_database(rds, False)
 
     assert apprunner.paused
-    assert rds.stopped == ["biofarm-staging-db-abc"]
+    assert rds.stopped == [staging_power.DB_IDENTIFIER]
 
 
 def test_up_starts_both():
@@ -93,7 +93,7 @@ def test_up_starts_both():
     staging_power._set_database(rds, True)
     staging_power._set_service(apprunner, True)
 
-    assert rds.started == ["biofarm-staging-db-abc"]
+    assert rds.started == [staging_power.DB_IDENTIFIER]
     assert apprunner.resumed
 
 
@@ -156,16 +156,47 @@ def test_a_service_mid_operation_is_left_alone():
 
 # --- an environment that is not deployed yet ---
 
-def test_a_missing_database_is_reported_not_raised(capsys):
+def test_a_missing_database_is_a_failure_not_a_skip(capsys):
+    """Reporting it and carrying on would make `down` look like it worked while
+    the database kept running - a silent bill rather than a visible failure."""
     rds = FakeRds(status="")
-    staging_power._set_database(rds, True)
-    assert "not found" in capsys.readouterr().out
+    assert staging_power._set_database(rds, True) is False
+    assert "not found" in capsys.readouterr().err
 
 
-def test_a_missing_service_is_reported_not_raised(capsys):
+def test_a_missing_service_is_a_failure_not_a_skip(capsys):
     apprunner = FakeAppRunner(status="")
-    staging_power._set_service(apprunner, True)
-    assert "not found" in capsys.readouterr().out
+    assert staging_power._set_service(apprunner, True) is False
+    assert "not found" in capsys.readouterr().err
+
+
+def test_down_exits_non_zero_when_the_database_is_missing(monkeypatch):
+    monkeypatch.setattr(staging_power, "_clients", lambda *_: (FakeRds(status=""), FakeAppRunner()))
+    monkeypatch.setattr(sys, "argv", ["staging_power.py", "down"])
+    assert staging_power.main() == 1
+
+
+def test_down_exits_zero_when_both_are_stopped(monkeypatch):
+    monkeypatch.setattr(
+        staging_power, "_clients", lambda *_: (FakeRds("available"), FakeAppRunner("RUNNING"))
+    )
+    monkeypatch.setattr(sys, "argv", ["staging_power.py", "down"])
+    assert staging_power.main() == 0
+
+
+def test_the_identifier_matches_what_the_stack_actually_names_it():
+    """CloudFormation generates an identifier from the logical id unless one is
+    set. It was left unset, so this script looked for a name that would never
+    exist - it reported "not found" and left staging running. DataStack now names
+    it explicitly, and these two literals have to agree."""
+    import re
+
+    source = pathlib.Path(__file__).resolve().parents[1] / "biofarm_infra" / "data_stack.py"
+    text = source.read_text(encoding="utf-8")
+    assert re.search(r'instance_identifier=f"\{cfg\.resource_prefix\}-db"', text), (
+        "DataStack no longer names the instance the way this script looks for it"
+    )
+    assert staging_power.DB_IDENTIFIER == "biofarm-staging-db"
 
 
 def test_status_signals_failure_when_nothing_is_deployed():
@@ -178,9 +209,9 @@ def test_status_succeeds_when_both_exist():
 
 # --- API rejections ---
 
-def test_an_api_error_is_printed_rather_than_crashing(capsys):
+def test_an_api_error_is_reported_and_counted_as_failure(capsys):
     """This runs interactively. A traceback tells you less than the message AWS
-    returned."""
+    returned - but it still has to be a failure."""
     rds = FakeRds("available")
 
     def refuse(**_):
@@ -190,7 +221,7 @@ def test_an_api_error_is_printed_rather_than_crashing(capsys):
         )
 
     rds.stop_db_instance = refuse
-    staging_power._set_database(rds, False)
+    assert staging_power._set_database(rds, False) is False
 
     assert "cannot stop right now" in capsys.readouterr().err
 

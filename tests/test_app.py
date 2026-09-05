@@ -199,3 +199,33 @@ def test_the_container_cannot_list_the_whole_bucket(apps, env_name):
     the local IAM user has no ListBucket and every path still works."""
     rendered = json.dumps(apps[env_name].to_json())
     assert "s3:ListBucket" not in rendered
+
+
+# --- log retention ---
+
+def test_log_retention_differs_per_environment(apps):
+    """This was silently broken: the enum was looked up by a constructed
+    attribute name that never matched, so every environment fell through to the
+    same default and the per-environment setting did nothing. A config value that
+    is quietly ignored is worse than one that is wrong."""
+    from config import PROD, STAGING
+
+    def retention(template):
+        groups = template.find_resources("AWS::Logs::LogGroup")
+        assert groups, "expected a log group for the cleanup task"
+        return next(iter(groups.values()))["Properties"]["RetentionInDays"]
+
+    assert retention(apps["staging"]) == STAGING.log_retention_days
+    assert retention(apps["prod"]) == PROD.log_retention_days
+    assert retention(apps["staging"]) != retention(apps["prod"])
+
+
+def test_an_unsupported_retention_is_refused_rather_than_defaulted():
+    """CloudWatch accepts only a fixed set of periods. Falling back to a default
+    is how the original bug stayed invisible."""
+    import pytest as _pytest
+
+    from biofarm_infra.app_stack import log_retention
+
+    with _pytest.raises(ValueError, match="does not accept"):
+        log_retention(11)
