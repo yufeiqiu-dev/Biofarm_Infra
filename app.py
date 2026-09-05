@@ -15,6 +15,7 @@ can build the same tree and assert against it without synthesizing to disk.
 
 import aws_cdk as cdk
 
+from biofarm_infra.app_stack import AppStack
 from biofarm_infra.cicd_stack import CicdStack
 from biofarm_infra.data_stack import DataStack
 from biofarm_infra.network_stack import NetworkStack
@@ -42,7 +43,7 @@ def build_app(env: cdk.Environment | None = None) -> cdk.App:
     # Account-level and shared. An account may hold only one OIDC provider per
     # issuer URL, which is itself why this is not something each environment
     # creates for itself.
-    CicdStack(app, "Biofarm-Cicd", env=aws_env)
+    cicd = CicdStack(app, "Biofarm-Cicd", env=aws_env)
 
     # One VPC for every environment. See network_stack.py for what that costs
     # and what is done to make it safe.
@@ -54,7 +55,19 @@ def build_app(env: cdk.Environment | None = None) -> cdk.App:
         )
         # Tags go on the stack, not the app: tagging the app from inside this
         # loop would leave every stack carrying whichever environment it ended on.
-        cdk.Tags.of(data).add("Environment", cfg.name)
+        application = AppStack(
+            app,
+            f"Biofarm-App-{cfg.name}",
+            network=network,
+            data=data,
+            cicd=cicd,
+            cfg=cfg,
+            env=aws_env,
+        )
+        # Tags go on the stack, not the app: tagging the app from inside this
+        # loop would leave every stack carrying whichever environment it ended on.
+        for stack in (data, application):
+            cdk.Tags.of(stack).add("Environment", cfg.name)
 
     cdk.Tags.of(app).add("Project", "Biofarm")
     cdk.Tags.of(app).add("ManagedBy", "cdk")

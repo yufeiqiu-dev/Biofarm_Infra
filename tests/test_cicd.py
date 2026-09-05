@@ -82,10 +82,13 @@ def test_no_long_lived_credential_is_created(cicd):
     cicd.resource_count_is("AWS::IAM::AccessKey", 0)
 
 
-def test_the_role_cannot_do_anything_beyond_ecr_login_yet(cicd):
-    """Deploy permissions are granted by the stacks that own the resources, so
-    this policy stays a description of what CI does rather than a wildcard.
-    ecr:GetAuthorizationToken is the one action with no resource to scope to."""
+def test_every_permission_is_scoped_to_a_resource(cicd):
+    """CI can push images and start deployments, and nothing else.
+
+    `ecr:GetAuthorizationToken` is the single exception: it has no resource to
+    scope to, by design of the API. Every other statement must name one, or the
+    role has quietly become account-wide.
+    """
     policies = cicd.find_resources("AWS::IAM::Policy")
     statements = [
         s
@@ -93,10 +96,25 @@ def test_the_role_cannot_do_anything_beyond_ecr_login_yet(cicd):
         for s in policy["Properties"]["PolicyDocument"]["Statement"]
     ]
     assert statements, "expected at least one policy statement"
+
     for statement in statements:
         actions = statement["Action"]
         actions = [actions] if isinstance(actions, str) else actions
-        assert actions == ["ecr:GetAuthorizationToken"], statements
+        assert "*" not in actions, statement
+
+        if statement["Resource"] == "*":
+            assert actions == ["ecr:GetAuthorizationToken"], (
+                f"unscoped statement beyond the login call: {statement}"
+            )
+
+
+def test_ci_can_push_images_but_not_delete_the_repository(cicd):
+    """A deploy role that can delete the repository turns a compromised workflow
+    into a loss of every image, including the one production is running."""
+    rendered = json.dumps(cicd.to_json())
+    for forbidden in ("ecr:DeleteRepository", "ecr:BatchDeleteImage", "ecr:PutLifecyclePolicy"):
+        assert forbidden not in rendered, forbidden
+    assert "ecr:PutImage" in rendered
 
 
 def test_sessions_are_short(cicd):

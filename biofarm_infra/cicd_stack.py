@@ -14,7 +14,7 @@ or in an unrelated repository under the same owner cannot assume this role.
 from __future__ import annotations
 
 import aws_cdk as cdk
-from aws_cdk import aws_iam as iam
+from aws_cdk import aws_ecr as ecr, aws_iam as iam
 from constructs import Construct
 
 from config import BACKEND_REPO, ENVIRONMENTS, FRONTEND_REPO, GITHUB_OWNER
@@ -91,6 +91,40 @@ class CicdStack(cdk.Stack):
                 # design. The push itself is scoped, in AppStack.
                 resources=["*"],
             )
+        )
+
+        # One repository for both environments, not one each. Promoting staging
+        # to production then means retagging a digest that has already been
+        # tested, rather than rebuilding and hoping the result is identical.
+        self.repository = ecr.Repository(
+            self,
+            "BackendRepository",
+            repository_name="biofarm-backend",
+            image_scan_on_push=True,
+            image_tag_mutability=ecr.TagMutability.MUTABLE,
+            # Untagged images accumulate on every push, and ECR bills for
+            # storage. Tagged ones are what the services actually run.
+            lifecycle_rules=[
+                ecr.LifecycleRule(
+                    description="Expire untagged images",
+                    tag_status=ecr.TagStatus.UNTAGGED,
+                    max_image_age=cdk.Duration.days(7),
+                ),
+                ecr.LifecycleRule(
+                    description="Keep the last 20 tagged images for rollback",
+                    tag_status=ecr.TagStatus.ANY,
+                    max_image_count=20,
+                ),
+            ],
+            removal_policy=cdk.RemovalPolicy.RETAIN,
+        )
+        self.repository.grant_pull_push(self.deploy_role)
+
+        cdk.CfnOutput(
+            self,
+            "EcrRepositoryUri",
+            value=self.repository.repository_uri,
+            description="Push target for the backend image.",
         )
 
         cdk.CfnOutput(

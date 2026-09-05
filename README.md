@@ -10,10 +10,14 @@ The application repositories are separate: `Biofarm_Backend` (FastAPI) and
 
 | Stack | Instances | Holds |
 |---|---|---|
-| `Biofarm-Cicd` | one | GitHub OIDC provider and the role Actions assumes |
+| `Biofarm-Cicd` | one | GitHub OIDC provider, the deploy role, the ECR repository |
 | `Biofarm-Network` | one | VPC, subnets, NAT instance, isolation between environments |
 | `Biofarm-Data-<env>` | per environment | RDS, Cognito, S3 + CloudFront, credentials |
-| `Biofarm-App-<env>` | per environment | ECR, App Runner, the scheduled cleanup job, Amplify |
+| `Biofarm-App-<env>` | per environment | App Runner, its VPC connector, the scheduled cleanup job |
+
+One ECR repository serves both environments rather than one each, so promoting
+staging to production retags a digest that has already been tested instead of
+rebuilding and hoping the result is identical.
 
 Two environments, `staging` and `prod`, defined in `config.py`. That file is the
 only place they differ - the stacks contain no environment branching of their own.
@@ -107,11 +111,42 @@ Two things about the Stripe values specifically:
   URL. It is **not** the one `stripe listen` prints - that belongs to a local CLI
   session and nothing else.
 
+## Deploying an environment
+
+The first deploy cannot set two values, because they refer to each other:
+`CORS_ORIGINS` needs the frontend's domain, and the frontend's
+`VITE_API_BASE_URL` needs the App Runner domain. So it is two passes.
+
+```bash
+npx aws-cdk deploy --profile <p> Biofarm-Cicd Biofarm-Network
+npx aws-cdk deploy --profile <p> Biofarm-Data-staging Biofarm-App-staging
+```
+
+Then, before the service can become healthy:
+
+1. **Write the Stripe values** into the SSM parameters (see above). The service
+   will not pass its health check until they are real - the backend refuses to
+   start with a placeholder, which is the intended behaviour.
+2. **Push an image.** App Runner points at `biofarm-backend:<env>` in ECR, and
+   nothing is there until CI has run once.
+3. **Create the webhook endpoint** in the Stripe Dashboard, in the matching mode,
+   against the service URL from the stack output. Put the signing secret it gives
+   you into that environment's `stripe-webhook-secret` parameter.
+4. **Set `CORS_ORIGINS`** to the frontend origin and deploy again.
+
+Deployments are not triggered by an ECR push. Both environments share one
+repository, so an automatic trigger would ship whatever landed under a tag,
+including a push meant for the other environment. CI starts the deployment
+explicitly.
+
 ## Status
 
-Built: `Biofarm-Cicd`, `Biofarm-Network`, `Biofarm-Data-<env>`. Still to come:
-`Biofarm-App-<env>` (ECR, App Runner, the scheduled cleanup job, Amplify), the
-staging power scripts, and the CI workflows in the application repositories.
+Built: `Biofarm-Cicd`, `Biofarm-Network`, `Biofarm-Data-<env>`,
+`Biofarm-App-<env>`. 80 tests, all offline.
+
+Still to come: frontend hosting (Amplify needs a GitHub connection authorized by
+hand once, so it is not purely declarative), the staging power scripts, and the
+CI workflows in the application repositories.
 
 Nothing has been deployed to an account yet. See `documentation/launch/` in
 `Biofarm_KnowledgeBase` for the wider launch plan this fits into.
