@@ -14,6 +14,7 @@ The application repositories are separate: `Biofarm_Backend` (FastAPI) and
 | `Biofarm-Network` | one | VPC, subnets, NAT instance, isolation between environments |
 | `Biofarm-Data-<env>` | per environment | RDS, Cognito, S3 + CloudFront, credentials |
 | `Biofarm-App-<env>` | per environment | App Runner, its VPC connector, the scheduled cleanup job |
+| `Biofarm-Web-<env>` | per environment | Amplify app and branch for the frontend |
 
 One ECR repository serves both environments rather than one each, so promoting
 staging to production retags a digest that has already been tested instead of
@@ -32,9 +33,11 @@ database accepts traffic only from its own environment's security group. Removin
 any of that fails the tests, which was checked rather than assumed. Treat those
 tests as load-bearing, not decoration.
 
-**Staging is stopped when idle.** Its database is stopped and its App Runner
-service paused outside active testing. Worth knowing: AWS force-starts a stopped
-RDS instance after 7 days, so this is a schedule, not a one-off.
+**Staging is stopped when idle.** `scripts/staging_power.py up|down|status`
+stops its database and pauses its App Runner service, taking the environment from
+roughly $28 a month to near the storage floor. Worth knowing: AWS force-starts a
+stopped RDS instance after 7 days and there is no way to disable that, so `down`
+is a scheduled action rather than a switch that stays off.
 
 ## Running it
 
@@ -120,6 +123,14 @@ The first deploy cannot set two values, because they refer to each other:
 ```bash
 npx aws-cdk deploy --profile <p> Biofarm-Cicd Biofarm-Network
 npx aws-cdk deploy --profile <p> Biofarm-Data-staging Biofarm-App-staging
+
+# The frontend needs a GitHub token. AWS::Amplify::App has no declarative way to
+# connect a repository, and ssm-secure dynamic references do not work here - that
+# pattern is supported on an allowlist of eleven resource properties and Amplify
+# is not one of them. So it is a NoEcho parameter, read from the environment so
+# it stays out of shell history. Amplify does not retain it.
+export GITHUB_TOKEN=...
+npx aws-cdk deploy --profile <p> Biofarm-Web-staging   --parameters GitHubAccessToken=$GITHUB_TOKEN
 ```
 
 Then, before the service can become healthy:
@@ -133,6 +144,15 @@ Then, before the service can become healthy:
    against the service URL from the stack output. Put the signing secret it gives
    you into that environment's `stripe-webhook-secret` parameter.
 4. **Set `CORS_ORIGINS`** to the frontend origin and deploy again.
+5. **Console:** add the Amplify branch URL to the Cognito app client's callback
+   and sign-out URLs, or sign-in fails at the redirect with an error page from
+   Cognito rather than from this application.
+6. **Console:** set `VITE_STRIPE_PUBLISHABLE_KEY` on the Amplify branch. It is
+   publishable by design and ships inside the bundle, so it is a plain
+   environment variable rather than a secret.
+7. **Console:** create your user in the environment's Cognito pool and put it in
+   the `Admin` group. The group name is case-sensitive and checked in three
+   places.
 
 Deployments are not triggered by an ECR push. Both environments share one
 repository, so an automatic trigger would ship whatever landed under a tag,
@@ -141,12 +161,10 @@ explicitly.
 
 ## Status
 
-Built: `Biofarm-Cicd`, `Biofarm-Network`, `Biofarm-Data-<env>`,
-`Biofarm-App-<env>`. 80 tests, all offline.
+All five stacks are built, with 120 tests, all offline.
 
-Still to come: frontend hosting (Amplify needs a GitHub connection authorized by
-hand once, so it is not purely declarative), the staging power scripts, and the
-CI workflows in the application repositories.
+Still to come: the `staging` branches and CI workflows in the application
+repositories.
 
 Nothing has been deployed to an account yet. See `documentation/launch/` in
 `Biofarm_KnowledgeBase` for the wider launch plan this fits into.

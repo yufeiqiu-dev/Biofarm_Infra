@@ -19,6 +19,7 @@ from biofarm_infra.app_stack import AppStack
 from biofarm_infra.cicd_stack import CicdStack
 from biofarm_infra.data_stack import DataStack
 from biofarm_infra.network_stack import NetworkStack
+from biofarm_infra.web_stack import WebStack
 from config import ENVIRONMENTS
 
 
@@ -64,9 +65,17 @@ def build_app(env: cdk.Environment | None = None) -> cdk.App:
             cfg=cfg,
             env=aws_env,
         )
+        web = WebStack(
+            app,
+            f"Biofarm-Web-{cfg.name}",
+            data=data,
+            application=application,
+            cfg=cfg,
+            env=aws_env,
+        )
         # Tags go on the stack, not the app: tagging the app from inside this
         # loop would leave every stack carrying whichever environment it ended on.
-        for stack in (data, application):
+        for stack in (data, application, web):
             cdk.Tags.of(stack).add("Environment", cfg.name)
 
     cdk.Tags.of(app).add("Project", "Biofarm")
