@@ -150,9 +150,27 @@ Then, before the service can become healthy:
 6. **Console:** set `VITE_STRIPE_PUBLISHABLE_KEY` on the Amplify branch. It is
    publishable by design and ships inside the bundle, so it is a plain
    environment variable rather than a secret.
-7. **Console:** create your user in the environment's Cognito pool and put it in
-   the `Admin` group. The group name is case-sensitive and checked in three
-   places.
+7. **Console:** create your own user in the environment's Cognito pool and put
+   it in the `Admin` group. The group name is case-sensitive and checked in
+   three places.
+8. **Staging only — seed the test accounts:**
+
+   ```bash
+   python scripts/seed_test_users.py --profile <p>
+   ```
+
+   The stack creates the two end-to-end accounts and generates a password for
+   each in Secrets Manager, but it cannot make them usable.
+   `AWS::Cognito::UserPoolUser` has no password property - not a permanent one
+   and not even a temporary one - so an account created by a deploy always lands
+   in `FORCE_CHANGE_PASSWORD`, and `AdminSetUserPassword` is the only API that
+   moves it out. The script applies the generated password. It is idempotent, so
+   CI can run it before every suite.
+
+   Production has no test accounts and the script refuses to touch it. A seeded
+   account with a machine-readable password is a way in; a test asserts the
+   production template contains no user, no group attachment and no password
+   secret.
 
 Deployments are not triggered by an ECR push. Both environments share one
 repository, so an automatic trigger would ship whatever landed under a tag,
@@ -161,10 +179,10 @@ explicitly.
 
 ## Status
 
-All five stacks are built, with 120 tests, all offline.
+All five stacks are built, with 134 tests, all offline.
 
 Still to come: the `staging` branches and CI workflows in the application
-repositories.
+repositories, and the Playwright suite that signs in as the seeded accounts.
 
 Nothing has been deployed to an account yet. See `documentation/launch/` in
 `Biofarm_KnowledgeBase` for the wider launch plan this fits into.

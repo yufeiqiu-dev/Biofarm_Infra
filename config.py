@@ -28,6 +28,34 @@ FRONTEND_REPO = "Biofarm_Frontend"
 
 
 @dataclass(frozen=True)
+class TestUser:
+    """A Cognito account created by the stack for automated tests.
+
+    Only ever staging. A seeded account with a known, machine-readable password
+    is a way in, and production must not have one - `test_users` is empty for
+    PROD and a test asserts that the synthesized production template contains no
+    user, no group attachment and no password secret.
+
+    Addresses are under example.com, which IANA reserves and which therefore
+    cannot receive mail. Combined with SUPPRESS on the invitation, nothing is
+    ever sent anywhere.
+    """
+
+    name: str
+    """Short id used in the secret path and the CDK construct id."""
+
+    email: str
+
+    admin: bool = False
+    """Whether to put the account in the Admin group.
+
+    Both kinds are worth having. A suite that only signs in as an admin cannot
+    notice admin-only UI leaking into a customer's view, because its one account
+    is allowed to see all of it.
+    """
+
+
+@dataclass(frozen=True)
 class EnvConfig:
     """One deployed environment."""
 
@@ -74,6 +102,16 @@ class EnvConfig:
     secret. They are not interchangeable.
     """
 
+    test_users: tuple[TestUser, ...]
+    """Accounts the stack creates for end-to-end tests. Empty for production.
+
+    CloudFormation cannot finish these: AWS::Cognito::UserPoolUser has no
+    password property at all, so a user created by a deploy always lands in
+    FORCE_CHANGE_PASSWORD and cannot sign in. The stack creates the account and
+    a generated password beside it; scripts/seed_test_users.py makes the two
+    agree. See the README.
+    """
+
     stopped_when_idle: bool
     """Staging is powered down outside active testing (see scripts/staging_power.py).
 
@@ -105,6 +143,10 @@ STAGING = EnvConfig(
     apprunner_memory="0.5 GB",
     log_retention_days=7,
     stripe_mode="test",
+    test_users=(
+        TestUser(name="customer", email="e2e-customer@example.com"),
+        TestUser(name="admin", email="e2e-admin@example.com", admin=True),
+    ),
     stopped_when_idle=True,
 )
 
@@ -121,6 +163,8 @@ PROD = EnvConfig(
     apprunner_memory="0.5 GB",
     log_retention_days=30,
     stripe_mode="live",
+    # Deliberately empty. See TestUser.
+    test_users=(),
     stopped_when_idle=False,
 )
 
