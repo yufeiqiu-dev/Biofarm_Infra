@@ -83,12 +83,19 @@ class CicdStack(cdk.Stack):
         # grants push on its ECR repository and StartDeployment on its service -
         # so this role's policy stays a description of what CI actually does,
         # rather than a wildcard maintained by hand.
+        # ecr:GetAuthorizationToken is not granted here: grant_pull_push below
+        # adds it, and stating it twice produced two identical statements in the
+        # policy - noise that makes the next reader wonder which one matters.
         self.deploy_role.add_to_policy(
             iam.PolicyStatement(
-                sid="EcrLogin",
-                actions=["ecr:GetAuthorizationToken"],
-                # This action has no resource to scope to; it is account-wide by
-                # design. The push itself is scoped, in AppStack.
+                sid="FindTheService",
+                # The workflow looks the service up by name to get its ARN, and
+                # ListServices takes no resource either - it is the call that
+                # tells you which ARNs exist. Without it the deploy job fails
+                # with AccessDenied *after* the image is already in ECR, and
+                # never reaches the friendlier "deploy the stack first" branch.
+                # Read-only: it returns names, ARNs and status, nothing else.
+                actions=["apprunner:ListServices"],
                 resources=["*"],
             )
         )

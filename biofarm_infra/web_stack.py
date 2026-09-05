@@ -43,6 +43,12 @@ frontend:
   phases:
     preBuild:
       commands:
+        # The same .nvmrc the repository's CI reads. Without this Amplify uses
+        # whatever its build image defaults to, so a green CI run would say
+        # nothing about the build that actually deploys - which is the whole
+        # point of having CI in front of it. Vite requires ^20.19 || >=22.12.
+        - nvm install $(cat .nvmrc) && nvm use $(cat .nvmrc)
+        - node --version
         - npm ci
     build:
       commands:

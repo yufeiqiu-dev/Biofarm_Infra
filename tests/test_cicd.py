@@ -103,9 +103,23 @@ def test_every_permission_is_scoped_to_a_resource(cicd):
         assert "*" not in actions, statement
 
         if statement["Resource"] == "*":
-            assert actions == ["ecr:GetAuthorizationToken"], (
-                f"unscoped statement beyond the login call: {statement}"
-            )
+            # Only calls that take no resource at all. ecr:GetAuthorizationToken
+            # returns a registry token; apprunner:ListServices is what tells you
+            # which service ARNs exist, so it cannot be scoped to one. Both are
+            # read-only. Anything else appearing here is a mistake.
+            assert actions in (
+                ["ecr:GetAuthorizationToken"],
+                ["apprunner:ListServices"],
+            ), f"unscoped statement beyond the calls that cannot be scoped: {statement}"
+
+
+def test_ci_can_find_the_service_it_deploys(cicd):
+    """The workflow resolves the service ARN by name before calling
+    StartDeployment. Without ListServices the job fails with AccessDenied - and
+    it fails after the image has already been pushed to ECR, so the failure
+    looks like a deploy problem rather than a permissions one."""
+    rendered = json.dumps(cicd.to_json())
+    assert "apprunner:ListServices" in rendered
 
 
 def test_ci_can_push_images_but_not_delete_the_repository(cicd):

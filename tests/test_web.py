@@ -95,6 +95,15 @@ def test_the_build_uses_the_lockfile(webs, env_name):
     assert "baseDirectory: dist" in build_spec
 
 
+@pytest.mark.parametrize("env_name", [cfg.name for cfg in ENVIRONMENTS])
+def test_the_build_uses_the_same_node_version_as_ci(webs, env_name):
+    """Amplify otherwise uses whatever its build image defaults to, and a green
+    CI run then says nothing about the build that actually deploys - which is the
+    only reason the CI job exists."""
+    build_spec = _app(webs[env_name])["BuildSpec"]
+    assert ".nvmrc" in build_spec, "the build does not pin a Node version"
+
+
 # --- the values the bundle is built with ---
 
 @pytest.mark.parametrize("env_name", [cfg.name for cfg in ENVIRONMENTS])
