@@ -1,0 +1,13 @@
+# Pinned exactly, like the backend's requirements.txt. This repo's whole purpose
+# is to still work when it is run against a new account much later, so a floating
+# dependency here defeats the point.
+#
+# Note what is deliberately absent: aws-cdk.aws-apprunner-alpha. The L2 App
+# Runner construct is still an alpha module (2.268.0a0, "Development Status ::
+# 4 - Beta") whose API can change between releases. App Runner is built from the
+# L1 CfnService in aws-cdk-lib instead, which is stable.
+aws-cdk-lib==2.268.0
+constructs>=10.0.0,<11.0.0
+
+# Tests run against the synthesized template; no AWS account or credentials needed.
+pytest==8.4.2
