@@ -10,7 +10,7 @@ aws-cdk-lib==2.268.0
 constructs>=10.0.0,<11.0.0
 
 # Tests run against the synthesized template; no AWS account or credentials needed.
-pytest==8.4.2
+pytest==9.0.3
 
 # For scripts/staging_power.py only. The stacks themselves do not use boto3 -
 # CDK synthesizes offline - so this is a tooling dependency, not an infra one.
