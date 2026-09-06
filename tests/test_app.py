@@ -279,3 +279,18 @@ def test_neither_environment_runs_with_email_bypassed(templates, cfg):
 
     assert values["EMAIL_BYPASS"] == "false"
     assert values["EMAIL_FROM"] == cfg.email_from
+
+
+@pytest.mark.parametrize("cfg", ENVIRONMENTS, ids=lambda c: c.name)
+def test_the_backend_is_told_what_to_log(templates, cfg):
+    """The application's own log lines are the only trace of anything
+    email_service swallows by design. Left unset the backend uses its default,
+    and the level cannot be raised without a code change."""
+    template = templates[f"Biofarm-App-{cfg.name}"]
+    service = list(template.find_resources("AWS::AppRunner::Service").values())[0]
+    env = service["Properties"]["SourceConfiguration"]["ImageRepository"][
+        "ImageConfiguration"
+    ]["RuntimeEnvironmentVariables"]
+    values = {pair["Name"]: pair["Value"] for pair in env}
+
+    assert values["LOG_LEVEL"] == cfg.log_level

@@ -88,6 +88,14 @@ class EnvConfig:
     apprunner_cpu: str
     apprunner_memory: str
 
+    log_level: str
+    """Root log level for the backend.
+
+    Per-environment so staging can be turned up while something is being chased
+    without touching production. Both are INFO today; the field exists so
+    raising one does not mean editing code.
+    """
+
     log_retention_days: int
 
     stripe_mode: str
@@ -152,6 +160,7 @@ STAGING = EnvConfig(
     db_multi_az=False,
     apprunner_cpu="0.25 vCPU",
     apprunner_memory="0.5 GB",
+    log_level="INFO",
     log_retention_days=7,
     stripe_mode="test",
     test_users=(
@@ -175,6 +184,7 @@ PROD = EnvConfig(
     db_multi_az=False,
     apprunner_cpu="0.25 vCPU",
     apprunner_memory="0.5 GB",
+    log_level="INFO",
     log_retention_days=30,
     stripe_mode="live",
     # Deliberately empty. See TestUser.

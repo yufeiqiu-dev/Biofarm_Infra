@@ -280,6 +280,11 @@ class AppStack(cdk.Stack):
             # charges a card and never says so is not a working store.
             "EMAIL_BYPASS": "false",
             "EMAIL_FROM": cfg.email_from,
+            # Without this the backend logs at its default. The application's
+            # own log lines are the only trace of anything email_service
+            # swallows by design, so being able to turn them up per environment
+            # matters more than it looks.
+            "LOG_LEVEL": cfg.log_level,
         }
         return [
             apprunner.CfnService.KeyValuePairProperty(name=name, value=value)
