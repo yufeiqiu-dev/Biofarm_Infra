@@ -270,12 +270,7 @@ def test_the_backend_can_send_its_own_mail_and_nobody_elses(templates, cfg):
 def test_neither_environment_runs_with_email_bypassed(templates, cfg):
     """The backend refuses to boot with it on under APP_ENV=prod, which both
     environments run - so this failing means a deploy that will not start."""
-    template = templates[f"Biofarm-App-{cfg.name}"]
-    service = list(template.find_resources("AWS::AppRunner::Service").values())[0]
-    env = service["Properties"]["SourceConfiguration"]["ImageRepository"][
-        "ImageConfiguration"
-    ]["RuntimeEnvironmentVariables"]
-    values = {pair["Name"]: pair["Value"] for pair in env}
+    values = _env(templates[f"Biofarm-App-{cfg.name}"])
 
     assert values["EMAIL_BYPASS"] == "false"
     assert values["EMAIL_FROM"] == cfg.email_from
@@ -286,11 +281,13 @@ def test_the_backend_is_told_what_to_log(templates, cfg):
     """The application's own log lines are the only trace of anything
     email_service swallows by design. Left unset the backend uses its default,
     and the level cannot be raised without a code change."""
-    template = templates[f"Biofarm-App-{cfg.name}"]
-    service = list(template.find_resources("AWS::AppRunner::Service").values())[0]
-    env = service["Properties"]["SourceConfiguration"]["ImageRepository"][
-        "ImageConfiguration"
-    ]["RuntimeEnvironmentVariables"]
-    values = {pair["Name"]: pair["Value"] for pair in env}
+    assert _env(templates[f"Biofarm-App-{cfg.name}"])["LOG_LEVEL"] == cfg.log_level
 
-    assert values["LOG_LEVEL"] == cfg.log_level
+
+@pytest.mark.parametrize("cfg", ENVIRONMENTS, ids=lambda c: c.name)
+def test_the_log_level_is_a_level(cfg):
+    """Asserting the template matches the config proves plumbing and nothing
+    else - "VERBOSE" would satisfy it. The backend falls back to INFO on an
+    unknown value and logs one warning, so a typo here looks like "I raised the
+    level and nothing happened"."""
+    assert cfg.log_level in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
