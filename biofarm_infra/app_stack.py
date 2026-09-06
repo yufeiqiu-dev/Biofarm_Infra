@@ -241,11 +241,16 @@ class AppStack(cdk.Stack):
         # the sub. So AdminGetUser is being handed the real username rather than
         # a lookup key.
         #
-        # That is fixed at pool creation and cannot be altered afterwards, so it
-        # cannot drift. It can only be lost by *replacing* the pool with one
-        # configured differently - which is worth knowing because the failure is
-        # quiet: AdminGetUser would raise UserNotFoundException, and the console
-        # renders that as a deleted account rather than as a broken lookup.
+        # Verified against the staging pool on 2026-09-06: AdminGetUser resolves
+        # an account by sub and by email, so ListUsers is not needed for either
+        # the order detail page or the order search.
+        #
+        # That configuration is fixed at pool creation and cannot be altered
+        # afterwards, so it cannot drift. It can only be lost by *replacing* the
+        # pool with one configured differently - worth knowing because the
+        # failure is quiet: AdminGetUser would raise UserNotFoundException, and
+        # the console renders that as a deleted account rather than a broken
+        # lookup.
         role.add_to_policy(
             iam.PolicyStatement(
                 actions=["cognito-idp:AdminGetUser"],
