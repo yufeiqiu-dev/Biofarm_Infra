@@ -221,6 +221,38 @@ class AppStack(cdk.Stack):
             )
         )
 
+        # Resolving an order's user_id to the person who placed it.
+        #
+        # This is the only Cognito *API* call the backend makes. Verifying a
+        # token reads the pool's JWKS document, which is public HTTPS and needs
+        # no credentials at all - so until now the role needed nothing from
+        # Cognito, and that is worth not losing track of.
+        #
+        # AdminGetUser rather than ListUsers, which is what this was first
+        # written as. Neither can be scoped below the pool - IAM has no notion of
+        # "this one user" here - but they grant very different things: ListUsers
+        # lets a compromised container enumerate every customer in the pool,
+        # while this reads only an account whose sub it already holds. The
+        # difference is the customer list.
+        #
+        # It works because the pool has UsernameAttributes ["email"] and no
+        # alias attributes. In that configuration Cognito does not let a username
+        # be chosen at all - it generates a uuid, and that generated username is
+        # the sub. So AdminGetUser is being handed the real username rather than
+        # a lookup key.
+        #
+        # That is fixed at pool creation and cannot be altered afterwards, so it
+        # cannot drift. It can only be lost by *replacing* the pool with one
+        # configured differently - which is worth knowing because the failure is
+        # quiet: AdminGetUser would raise UserNotFoundException, and the console
+        # renders that as a deleted account rather than as a broken lookup.
+        role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["cognito-idp:AdminGetUser"],
+                resources=[data.user_pool.user_pool_arn],
+            )
+        )
+
         return role
 
     # --- network path ---

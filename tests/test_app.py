@@ -291,3 +291,60 @@ def test_the_log_level_is_a_level(cfg):
     unknown value and logs one warning, so a typo here looks like "I raised the
     level and nothing happened"."""
     assert cfg.log_level in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+
+
+def _cognito_statements(template) -> list[dict]:
+    out = []
+    for statement in _instance_role_statements(template):
+        actions = statement.get("Action", [])
+        actions = actions if isinstance(actions, list) else [actions]
+        if any(str(a).startswith("cognito-idp:") for a in actions):
+            out.append(statement)
+    return out
+
+
+def _actions_of(statements) -> set[str]:
+    actions: set[str] = set()
+    for statement in statements:
+        value = statement.get("Action", [])
+        actions.update(value if isinstance(value, list) else [value])
+    return actions
+
+
+@pytest.mark.parametrize("cfg", ENVIRONMENTS, ids=lambda c: c.name)
+def test_the_backend_can_resolve_a_sub_to_an_account(templates, cfg):
+    """The admin console maps an order's user_id back to a person.
+
+    Verifying a token needs no IAM at all - the pool's JWKS document is public
+    HTTPS - so this is the only Cognito permission the backend has, and it
+    exists for exactly one endpoint.
+    """
+    statements = _cognito_statements(templates[f"Biofarm-App-{cfg.name}"])
+    assert statements, "the backend cannot look up who an order belongs to"
+    assert _actions_of(statements) == {"cognito-idp:AdminGetUser"}
+
+
+@pytest.mark.parametrize("cfg", ENVIRONMENTS, ids=lambda c: c.name)
+def test_the_backend_cannot_enumerate_or_change_the_pool(templates, cfg):
+    """Read-only, and one account at a time.
+
+    A container that can create, disable or delete a user, or set a password, is
+    a container that can take over a customer account. ListUsers is barred
+    separately: it needs the same IAM resource as AdminGetUser but would let a
+    compromised container dump the whole customer list, which is exactly what
+    granting the narrower action avoids.
+    """
+    actions = _actions_of(_cognito_statements(templates[f"Biofarm-App-{cfg.name}"]))
+
+    assert actions == {"cognito-idp:AdminGetUser"}, actions
+    assert "cognito-idp:ListUsers" not in actions
+
+
+@pytest.mark.parametrize("cfg", ENVIRONMENTS, ids=lambda c: c.name)
+def test_cognito_access_is_scoped_to_this_environments_pool(templates, cfg):
+    """A wildcard would let staging enumerate production's customers."""
+    for statement in _cognito_statements(templates[f"Biofarm-App-{cfg.name}"]):
+        resources = statement.get("Resource", [])
+        resources = resources if isinstance(resources, list) else [resources]
+        assert resources, "no resource scope at all"
+        assert "*" not in resources, "ListUsers granted on every pool in the account"
