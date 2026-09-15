@@ -144,10 +144,15 @@ Then, before the service can become healthy:
    against the service URL from the stack output. Put the signing secret it gives
    you into that environment's `stripe-webhook-secret` parameter.
 4. **Set `CORS_ORIGINS`** to the frontend origin and deploy again.
-4b. **Verify the sender in SES.** `EMAIL_FROM` is set from `config.py` and the
-   backend refuses to boot without it, but SES will not send from an identity it
-   has not verified. Verify the address (or the domain, once it exists) in the
-   SES console for the same region.
+4b. **Verify the sender in SES, when there is a domain to verify it on.**
+   `EMAIL_FROM` is set from `config.py`, but staging is allowed to boot with it
+   blank - the backend degrades (no order-confirmation mail) rather than
+   refuses to start, specifically so a staging environment can go live before a
+   domain and SES exist. **Production has no such exemption**: a test fails the
+   build if `PROD.email_from` is ever blank, and SES will not send from an
+   identity it has not verified regardless of environment. Once the address (or
+   the domain) is verified, fill `email_from` in for that environment in
+   `config.py` and redeploy `Biofarm-App-<env>` - nothing else changes.
 
    Note what sandbox means: a new account can only send *to* verified addresses
    as well, so staging reaches the team and nobody else. Production needs
@@ -188,7 +193,7 @@ explicitly.
 
 ## Status
 
-All five stacks are built, with 138 tests, all offline.
+All five stacks are built, with 149 tests, all offline.
 
 Still to come: the `staging` branches and CI workflows in the application
 repositories, and the Playwright suite that signs in as the seeded accounts.
