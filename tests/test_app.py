@@ -276,6 +276,20 @@ def test_neither_environment_runs_with_email_bypassed(templates, cfg):
     assert values["EMAIL_FROM"] == cfg.email_from
 
 
+def test_production_requires_a_configured_sender(templates):
+    """EMAIL_FROM being blank is not unsafe enough for Settings to refuse to
+    boot - it degrades (no confirmation mail) rather than lies, so staging can
+    come up and take real orders before SES is set up. But that trade is only
+    for staging: nothing on the backend can tell the two apart (both run
+    APP_ENV=prod, deliberately), so production requiring a real sender has to
+    be enforced here instead, the same way the rest of what differs between
+    environments is."""
+    from config import PROD
+
+    assert PROD.email_from, "PROD.email_from in config.py must not be blank"
+    assert _env(templates["Biofarm-App-prod"])["EMAIL_FROM"] == PROD.email_from
+
+
 @pytest.mark.parametrize("cfg", ENVIRONMENTS, ids=lambda c: c.name)
 def test_the_backend_is_told_what_to_log(templates, cfg):
     """The application's own log lines are the only trace of anything

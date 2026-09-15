@@ -123,12 +123,18 @@ class EnvConfig:
     email_from: str
     """The SES-verified sender for this environment's transactional mail.
 
-    Written into EMAIL_FROM, which the backend requires: without it SES rejects
-    every message, the service swallows the rejection by design, and the symptom
-    is silence. The address has to be verified in SES before it will send, and
-    SES starts every account in the sandbox, where it also only delivers to
-    verified *recipients* - so staging reaches the team and nobody else until
-    production access is granted.
+    Written into EMAIL_FROM. Blank is a legitimate value for staging - the
+    backend degrades rather than refuses to boot when it is unset (see
+    Settings.email_from in Biofarm_Backend), so staging can come up and take
+    real orders before a domain and SES exist; order-confirmation mail simply
+    does not go out until this is filled in and redeployed. Production has no
+    such exemption: test_production_requires_a_configured_sender fails the
+    build if PROD's is ever blank.
+
+    Once it is set, the address still has to be verified in SES before it will
+    send, and SES starts every account in the sandbox, where it also only
+    delivers to verified *recipients* - so even a configured staging reaches the
+    team and nobody else until production access is granted.
     """
 
     stopped_when_idle: bool
@@ -167,9 +173,11 @@ STAGING = EnvConfig(
         TestUser(name="customer", email="e2e-customer@example.com"),
         TestUser(name="admin", email="e2e-admin@example.com", admin=True),
     ),
-    # Replace once the company domain exists; until then this must be an address
-    # verified by hand in SES, or the service will not boot.
-    email_from="orders@oasisbiofarm.net",
+    # Blank until the domain exists and an address on it is verified in SES -
+    # staging boots fine without it (see the field's docstring); confirmation
+    # mail just does not send in the meantime. Fill in and redeploy
+    # Biofarm-App-staging once that is done.
+    email_from="",
     stopped_when_idle=True,
 )
 
