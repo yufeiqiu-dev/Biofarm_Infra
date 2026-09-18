@@ -23,6 +23,20 @@ history too.
 One Amplify app per environment rather than one app with two branches. It matches
 how every other resource here is arranged, and it means a staging build cannot
 touch the production app at all.
+
+**The Cognito app client's callback URLs are a console step, not code, and
+deliberately stay that way.** This stack already knows the real origin - see
+`_environment` below - so it could reach across to DataStack's UserPoolClient
+and update it. The reason it does not: `cognito-idp:UpdateUserPoolClient` is a
+full replace, not a merge - any field left out of the call resets to its
+default, which makes a custom resource calling it a second, silently-drifting
+owner of settings CloudFormation already owns declaratively (the OAuth flows,
+the scopes, PreventUserExistenceErrors). That is exactly the class of bug this
+repository avoids elsewhere - Alembic is the schema's only owner for the same
+reason. The actual fix is EnvConfig growing a `frontend_domain` field once a
+real domain exists: a plain string known at synth time needs no cross-stack
+trick at all, and DataStack can put it in `callback_urls` from the first
+deploy. Until then, this is the README's console step.
 """
 
 from __future__ import annotations

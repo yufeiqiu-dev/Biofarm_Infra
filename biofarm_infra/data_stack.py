@@ -315,8 +315,12 @@ class DataStack(cdk.Stack):
                     cognito.OAuthScope.PROFILE,
                 ],
                 # Callback URLs need the Amplify domain, which does not exist
-                # until AppStack has deployed. AppStack adds them; see the
-                # two-pass note in the README.
+                # until WebStack has deployed - and WebStack depends on this
+                # stack, so it cannot be the other way around without a cycle
+                # CloudFormation cannot deploy. Nothing here adds the real
+                # domain automatically: it is a console step, deliberately -
+                # see the README's "add the Amplify branch URL" step and the
+                # note on why in WebStack's docstring.
                 callback_urls=["http://localhost:5174/auth/callback"],
                 logout_urls=["http://localhost:5174/auth/callback"],
             ),
