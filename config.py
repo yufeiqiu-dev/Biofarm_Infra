@@ -26,6 +26,13 @@ GITHUB_OWNER = "yufeiqiu-dev"
 BACKEND_REPO = "Biofarm_Backend"
 FRONTEND_REPO = "Biofarm_Frontend"
 
+# Where the budget alert and the CloudWatch alarms in MonitoringStack land.
+# A personal address on purpose, same as everything else before there is a
+# domain to build a shared ops inbox on - see EnvConfig.email_from. Neither
+# AWS Budgets' nor SNS's email notifications go through SES, so this needs no
+# verification and no domain to exist first.
+ALERT_EMAIL = "lerryqiu@gmail.com"
+
 
 @dataclass(frozen=True)
 class TestUser:

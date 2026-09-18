@@ -159,6 +159,40 @@ def test_there_is_exactly_one_nat_and_it_is_an_instance(network):
     network.resource_count_is("AWS::EC2::Instance", 1)
 
 
+def test_the_nat_has_an_elastic_ip(network):
+    """Without an EIP, the NAT's public address is the ordinary auto-assigned
+    kind: released the moment the instance stops, so a staging_power.py
+    down/up cycle - or AWS replacing the instance under it - hands every
+    environment's outbound traffic a new IP with no notice."""
+    network.resource_count_is("AWS::EC2::EIP", 1)
+
+    eip = next(iter(network.find_resources("AWS::EC2::EIP").values()))
+    instance_ref = eip["Properties"].get("InstanceId")
+    assert instance_ref, "the EIP is not associated with any instance"
+
+    # A Ref to a resource defined in this stack, not a literal string - the
+    # same shape test_data.py checks for the database's own security group
+    # reference, and for the same reason: it proves the association points at
+    # a real instance this stack creates, not a hardcoded or imported id.
+    assert "Ref" in instance_ref, instance_ref
+    logical_id = instance_ref["Ref"]
+    resources = network.to_json()["Resources"]
+    assert resources[logical_id]["Type"] == "AWS::EC2::Instance", (
+        f"{logical_id} is not the NAT instance"
+    )
+
+
+def test_nat_identifiers_are_output(network):
+    """The instance id and the Elastic IP itself, so both can be read without
+    going through the console - and so a future script could locate the NAT
+    the same way scripts/staging_power.py locates the database, by output
+    rather than by guessing a naming convention."""
+    outputs = network.to_json().get("Outputs", {})
+    descriptions = " ".join(o.get("Description", "") for o in outputs.values())
+    assert "NAT instance's id" in descriptions or "NatInstanceId" in outputs
+    assert "NatElasticIp" in outputs
+
+
 def test_s3_traffic_avoids_the_nat(network):
     """A gateway endpoint is free, and image deletes and cleanup would otherwise
     be billed as NAT data processing."""

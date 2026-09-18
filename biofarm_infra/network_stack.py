@@ -103,6 +103,38 @@ class NetworkStack(cdk.Stack):
             "S3Endpoint", service=ec2.GatewayVpcEndpointAwsService.S3
         )
 
+        # Without an Elastic IP, the NAT instance's public address is the
+        # ordinary auto-assigned kind: it is released the moment the instance
+        # stops, so a scripts/staging_power.py `down`/`up` cycle - or AWS
+        # replacing the instance under it - hands every environment's outbound
+        # traffic a new IP with no notice. Anything on the other end that
+        # allowlists by IP (a webhook source, a bank's payment gateway) would
+        # start failing until someone noticed and updated the allowlist. An
+        # EIP is exempt from both: it survives a stop/start because that is
+        # what an Elastic IP is for, and re-associates itself automatically
+        # when CloudFormation replaces the instance, because the address is
+        # bound to this resource by instance_id rather than the other way
+        # around - nat_gateways=1 above means there is exactly one to bind.
+        self.nat_instance = nat_provider.gateway_instances[0]
+        self.nat_eip = ec2.CfnEIP(
+            self,
+            "NatEip",
+            instance_id=self.nat_instance.instance_id,
+        )
+
+        cdk.CfnOutput(
+            self,
+            "NatInstanceId",
+            value=self.nat_instance.instance_id,
+            description="The NAT instance's id, for locating it without going through the console.",
+        )
+        cdk.CfnOutput(
+            self,
+            "NatElasticIp",
+            value=self.nat_eip.attr_public_ip,
+            description="Outbound IP every environment's traffic leaves from. Stable across stop/start and instance replacement.",
+        )
+
         # Interface endpoints for Secrets Manager and ECR are deliberately not
         # here. They would remove another NAT dependency, but at roughly $7 per
         # endpoint per AZ they cost more than the NAT they would be sparing.

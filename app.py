@@ -18,6 +18,7 @@ import aws_cdk as cdk
 from biofarm_infra.app_stack import AppStack
 from biofarm_infra.cicd_stack import CicdStack
 from biofarm_infra.data_stack import DataStack
+from biofarm_infra.monitoring_stack import MonitoringStack
 from biofarm_infra.network_stack import NetworkStack
 from biofarm_infra.web_stack import WebStack
 from config import ENVIRONMENTS
@@ -46,13 +47,22 @@ def build_app(env: cdk.Environment | None = None) -> cdk.App:
     # creates for itself.
     cicd = CicdStack(app, "Biofarm-Cicd", env=aws_env)
 
+    # Also account-level: one budget and one alert topic cover every
+    # environment. See monitoring_stack.py.
+    monitoring = MonitoringStack(app, "Biofarm-Monitoring", env=aws_env)
+
     # One VPC for every environment. See network_stack.py for what that costs
     # and what is done to make it safe.
     network = NetworkStack(app, "Biofarm-Network", env=aws_env)
 
     for cfg in ENVIRONMENTS:
         data = DataStack(
-            app, f"Biofarm-Data-{cfg.name}", network=network, cfg=cfg, env=aws_env
+            app,
+            f"Biofarm-Data-{cfg.name}",
+            network=network,
+            monitoring=monitoring,
+            cfg=cfg,
+            env=aws_env,
         )
         # Tags go on the stack, not the app: tagging the app from inside this
         # loop would leave every stack carrying whichever environment it ended on.
@@ -62,6 +72,7 @@ def build_app(env: cdk.Environment | None = None) -> cdk.App:
             network=network,
             data=data,
             cicd=cicd,
+            monitoring=monitoring,
             cfg=cfg,
             env=aws_env,
         )

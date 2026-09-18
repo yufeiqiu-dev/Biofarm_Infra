@@ -11,9 +11,10 @@ The application repositories are separate: `Biofarm_Backend` (FastAPI) and
 | Stack | Instances | Holds |
 |---|---|---|
 | `Biofarm-Cicd` | one | GitHub OIDC provider, the deploy role, the ECR repository |
-| `Biofarm-Network` | one | VPC, subnets, NAT instance, isolation between environments |
-| `Biofarm-Data-<env>` | per environment | RDS, Cognito, S3 + CloudFront, credentials |
-| `Biofarm-App-<env>` | per environment | App Runner, its VPC connector, the scheduled cleanup job |
+| `Biofarm-Monitoring` | one | The account budget, and the SNS topic every alarm below publishes to |
+| `Biofarm-Network` | one | VPC, subnets, NAT instance (with its Elastic IP), isolation between environments |
+| `Biofarm-Data-<env>` | per environment | RDS (with alarms for storage and CPU), Cognito, S3 + CloudFront, credentials |
+| `Biofarm-App-<env>` | per environment | App Runner (with a 5xx alarm), its VPC connector, the scheduled cleanup job |
 | `Biofarm-Web-<env>` | per environment | Amplify app and branch for the frontend |
 
 One ECR repository serves both environments rather than one each, so promoting
@@ -72,10 +73,12 @@ invisible until they matter:
 
 - each database accepts traffic only from its own environment
 - network ACLs deny traffic between the environments' subnets
-- the NAT instance is not reachable from the internet
+- the NAT instance is not reachable from the internet, and holds an Elastic IP
+- every database rejects a connection that did not negotiate TLS
 - production refuses to be deleted; staging is disposable
 - no Stripe key appears anywhere in any template
 - only the deploying branches can assume the deploy role
+- the budget and every alarm actually reach a subscriber, not just a topic
 
 ## Credentials
 
@@ -120,8 +123,13 @@ The first deploy cannot set two values, because they refer to each other:
 `CORS_ORIGINS` needs the frontend's domain, and the frontend's
 `VITE_API_BASE_URL` needs the App Runner domain. So it is two passes.
 
+SNS does not deliver to an email subscriber until they confirm it - `cdk deploy`
+finishing does not mean the budget or the alarms actually reach anyone yet.
+Open the confirmation email `Biofarm-Monitoring` sends to `ALERT_EMAIL` in
+`config.py` and click it once, right after this first deploy.
+
 ```bash
-npx aws-cdk deploy --profile <p> Biofarm-Cicd Biofarm-Network
+npx aws-cdk deploy --profile <p> Biofarm-Cicd Biofarm-Monitoring Biofarm-Network
 npx aws-cdk deploy --profile <p> Biofarm-Data-staging Biofarm-App-staging
 
 # The frontend needs a GitHub token. AWS::Amplify::App has no declarative way to
@@ -193,7 +201,7 @@ explicitly.
 
 ## Status
 
-All five stacks are built, with 149 tests, all offline.
+All six stacks are built, with 172 tests, all offline.
 
 Still to come: the `staging` branches and CI workflows in the application
 repositories, and the Playwright suite that signs in as the seeded accounts.

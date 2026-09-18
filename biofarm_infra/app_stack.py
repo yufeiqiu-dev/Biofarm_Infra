@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import aws_cdk as cdk
 from aws_cdk import (
+    aws_cloudwatch as cloudwatch,
+    aws_cloudwatch_actions as cw_actions,
     aws_ecs as ecs,
     aws_iam as iam,
     aws_logs as logs,
@@ -33,6 +35,7 @@ from constructs import Construct
 
 from biofarm_infra.cicd_stack import CicdStack
 from biofarm_infra.data_stack import DataStack
+from biofarm_infra.monitoring_stack import MonitoringStack
 from biofarm_infra.network_stack import NetworkStack
 from config import EnvConfig
 
@@ -81,6 +84,7 @@ class AppStack(cdk.Stack):
         network: NetworkStack,
         data: DataStack,
         cicd: CicdStack,
+        monitoring: MonitoringStack,
         cfg: EnvConfig,
         **kwargs,
     ) -> None:
@@ -153,6 +157,7 @@ class AppStack(cdk.Stack):
         )
 
         self._schedule_cleanup(network, data, cicd, cfg)
+        self._create_5xx_alarm(monitoring, cfg)
 
         cdk.CfnOutput(
             self,
@@ -348,6 +353,41 @@ class AppStack(cdk.Stack):
                 for name, parameter in data.stripe_parameters.items()
             ),
         ]
+
+    # --- health ---
+
+    def _create_5xx_alarm(self, monitoring: MonitoringStack, cfg: EnvConfig) -> None:
+        """5 or more 5xx responses inside 5 minutes.
+
+        AWS/AppRunner's own metrics, not a custom one - App Runner publishes
+        these under ServiceName and ServiceID, the same two dimensions the
+        console filters by. ServiceName is the literal passed to CfnService
+        above, known at synth time; ServiceID only exists once the service is
+        created, so it comes from the construct's own attribute rather than
+        being guessed at.
+        """
+        five_xx = cloudwatch.Metric(
+            namespace="AWS/AppRunner",
+            metric_name="5xxStatusResponses",
+            dimensions_map={
+                "ServiceName": f"{cfg.resource_prefix}-backend",
+                "ServiceID": self.service.attr_service_id,
+            },
+            statistic="Sum",
+            period=cdk.Duration.minutes(5),
+        )
+        alarm = cloudwatch.Alarm(
+            self,
+            "FiveXxAlarm",
+            alarm_name=f"{cfg.resource_prefix}-5xx",
+            alarm_description=f"{cfg.name} backend returned 5 or more 5xx responses in 5 minutes.",
+            metric=five_xx,
+            threshold=5,
+            evaluation_periods=1,
+            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+            treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
+        )
+        alarm.add_alarm_action(cw_actions.SnsAction(monitoring.alert_topic))
 
     # --- the daily sweep ---
 

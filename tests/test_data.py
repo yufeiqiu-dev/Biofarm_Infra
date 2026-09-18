@@ -108,6 +108,33 @@ def test_production_refuses_to_be_deleted(data):
     assert staging["Properties"]["DeletionProtection"] is False
 
 
+@pytest.mark.parametrize("env_name", [cfg.name for cfg in ENVIRONMENTS])
+def test_the_database_requires_tls(data, env_name):
+    """rds.force_ssl rejects a connection that never negotiated TLS. Postgres
+    accepts plaintext by default, so without this an operator or a compromised
+    client inside the VPC could read every query unencrypted."""
+    template = data[env_name]
+    instance = next(iter(template.find_resources("AWS::RDS::DBInstance").values()))
+    group_ref = instance["Properties"]["DBParameterGroupName"]
+    assert group_ref, "the database has no parameter group attached"
+
+    groups = template.find_resources("AWS::RDS::DBParameterGroup")
+    assert groups, "expected a parameter group in this stack"
+    parameters = next(iter(groups.values()))["Properties"]["Parameters"]
+    assert parameters["rds.force_ssl"] == "1"
+
+
+@pytest.mark.parametrize("env_name", [cfg.name for cfg in ENVIRONMENTS])
+def test_a_database_identifier_is_output(data, env_name):
+    """scripts/staging_power.py finds the database by this same name; the
+    output exists so it can also be read without going through the console."""
+    outputs = data[env_name].to_json().get("Outputs", {})
+    assert any(
+        o.get("Description", "").startswith("What scripts/staging_power.py")
+        for o in outputs.values()
+    ), f"no DatabaseIdentifier output in {env_name}"
+
+
 def test_the_engine_matches_the_version_used_locally(data):
     """Local development runs Postgres 16 in Docker, pinned for this reason: a
     version difference between local and deployed only ever surfaces as a bug
@@ -315,6 +342,57 @@ def test_no_test_user_password_is_written_into_the_template(data):
         # The pool requires upper, lower and digits.
         assert generator["RequireEachIncludedType"] is True
         assert generator["ExcludePunctuation"] is True
+
+
+# --- alarms ---
+
+@pytest.mark.parametrize("env_name", [cfg.name for cfg in ENVIRONMENTS])
+def test_low_storage_is_alarmed(data, env_name):
+    """Under 2 GiB free. Storage autoscaling (max_allocated_storage) may still
+    be catching up, and running out entirely takes the database down."""
+    alarms = data[env_name].find_resources("AWS::CloudWatch::Alarm")
+    matches = [
+        a["Properties"]
+        for a in alarms.values()
+        if a["Properties"].get("MetricName") == "FreeStorageSpace"
+    ]
+    assert len(matches) == 1, matches
+    alarm = matches[0]
+    assert alarm["Threshold"] == 2 * 1024**3
+    assert alarm["ComparisonOperator"] == "LessThanThreshold"
+
+
+@pytest.mark.parametrize("env_name", [cfg.name for cfg in ENVIRONMENTS])
+def test_sustained_high_cpu_is_alarmed(data, env_name):
+    """Over 90% for 15 minutes - one 15-minute period rather than three 5-minute
+    evaluations, so a normal traffic burst that clears in a few minutes does not
+    trip it."""
+    alarms = data[env_name].find_resources("AWS::CloudWatch::Alarm")
+    matches = [
+        a["Properties"]
+        for a in alarms.values()
+        if a["Properties"].get("MetricName") == "CPUUtilization"
+    ]
+    assert len(matches) == 1, matches
+    alarm = matches[0]
+    assert alarm["Threshold"] == 90
+    assert alarm["ComparisonOperator"] == "GreaterThanThreshold"
+    assert alarm["Period"] == 900
+    assert alarm["EvaluationPeriods"] == 1
+
+
+@pytest.mark.parametrize("env_name", [cfg.name for cfg in ENVIRONMENTS])
+def test_the_rds_alarms_publish_to_the_shared_alert_topic(data, env_name):
+    alarms = data[env_name].find_resources("AWS::CloudWatch::Alarm")
+    rds_alarms = [
+        a["Properties"]
+        for a in alarms.values()
+        if a["Properties"].get("Namespace") == "AWS/RDS"
+    ]
+    assert len(rds_alarms) == 2, rds_alarms
+    for alarm in rds_alarms:
+        actions = json.dumps(alarm["AlarmActions"])
+        assert "AlertTopic" in actions
 
 
 def test_the_running_backend_cannot_read_the_test_passwords(templates):

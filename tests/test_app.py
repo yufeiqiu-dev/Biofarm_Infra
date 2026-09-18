@@ -362,3 +362,39 @@ def test_cognito_access_is_scoped_to_this_environments_pool(templates, cfg):
         resources = resources if isinstance(resources, list) else [resources]
         assert resources, "no resource scope at all"
         assert "*" not in resources, "ListUsers granted on every pool in the account"
+
+
+# --- alarms ---
+
+@pytest.mark.parametrize("env_name", [cfg.name for cfg in ENVIRONMENTS])
+def test_a_5xx_burst_is_alarmed(apps, env_name):
+    """5 or more 5xx responses in 5 minutes, published where the console itself
+    looks: AWS/AppRunner's own 5xxStatusResponses metric, not a custom one."""
+    alarms = apps[env_name].find_resources("AWS::CloudWatch::Alarm")
+    matches = [
+        a["Properties"]
+        for a in alarms.values()
+        if a["Properties"].get("MetricName") == "5xxStatusResponses"
+    ]
+    assert len(matches) == 1, matches
+
+    alarm = matches[0]
+    assert alarm["Namespace"] == "AWS/AppRunner"
+    assert alarm["Threshold"] == 5
+    assert alarm["ComparisonOperator"] == "GreaterThanOrEqualToThreshold"
+    assert alarm["Period"] == 300
+
+    dimensions = {d["Name"]: d["Value"] for d in alarm["Dimensions"]}
+    assert dimensions["ServiceName"] == f"biofarm-{env_name}-backend"
+
+
+@pytest.mark.parametrize("env_name", [cfg.name for cfg in ENVIRONMENTS])
+def test_the_5xx_alarm_publishes_to_the_shared_alert_topic(apps, env_name):
+    alarms = apps[env_name].find_resources("AWS::CloudWatch::Alarm")
+    alarm = next(
+        a["Properties"]
+        for a in alarms.values()
+        if a["Properties"].get("MetricName") == "5xxStatusResponses"
+    )
+    actions = json.dumps(alarm["AlarmActions"])
+    assert "AlertTopic" in actions, "the alarm does not point at MonitoringStack's topic"

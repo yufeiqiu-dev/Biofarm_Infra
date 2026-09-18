@@ -28,6 +28,8 @@ from aws_cdk import (
     aws_cloudfront as cloudfront,
     aws_cloudfront_origins as origins,
     aws_cognito as cognito,
+    aws_cloudwatch as cloudwatch,
+    aws_cloudwatch_actions as cw_actions,
     aws_ec2 as ec2,
     aws_rds as rds,
     aws_s3 as s3,
@@ -36,8 +38,14 @@ from aws_cdk import (
 )
 from constructs import Construct
 
+from biofarm_infra.monitoring_stack import MonitoringStack
 from biofarm_infra.network_stack import NetworkStack
 from config import EnvConfig
+
+# 2 GiB. Below this, RDS storage autoscaling (allocated up to max_allocated_storage
+# in _create_database) may still be mid-flight, and running out entirely takes the
+# database down rather than just slowing it.
+LOW_STORAGE_THRESHOLD_BYTES = 2 * 1024**3
 
 # Written by CDK so the parameter exists and App Runner can start; replaced out
 # of band with the real key. Chosen to be obviously invalid rather than
@@ -57,6 +65,7 @@ class DataStack(cdk.Stack):
         construct_id: str,
         *,
         network: NetworkStack,
+        monitoring: MonitoringStack,
         cfg: EnvConfig,
         **kwargs,
     ) -> None:
@@ -76,6 +85,7 @@ class DataStack(cdk.Stack):
         )
 
         self._create_database(network, cfg)
+        self._create_database_alarms(monitoring, cfg)
         self._create_image_storage(cfg)
         self._create_user_pool(cfg)
         self._create_test_users(cfg)
@@ -103,6 +113,23 @@ class DataStack(cdk.Stack):
             description=f"Only {cfg.name} App Runner may reach this database",
         )
 
+        # Postgres accepts unencrypted connections by default. rds.force_ssl
+        # rejects any connection that did not negotiate TLS, which is enforced
+        # server-side rather than trusted to every client that ever connects.
+        # psycopg's default sslmode is "prefer" - it already attempts TLS first
+        # and only falls back on rejection - so this needs no change on the
+        # application side; DATABASE_URL is unchanged.
+        #
+        # Parameter groups cannot be attached without a reboot once the
+        # instance exists, so this has to be here from the first deploy.
+        self.db_parameter_group = rds.ParameterGroup(
+            self,
+            "DatabaseParameterGroup",
+            engine=rds.DatabaseInstanceEngine.postgres(version=POSTGRES_VERSION),
+            description=f"Forces TLS on Postgres connections for {cfg.name}.",
+            parameters={"rds.force_ssl": "1"},
+        )
+
         self.database = rds.DatabaseInstance(
             self,
             "Database",
@@ -118,6 +145,7 @@ class DataStack(cdk.Stack):
             vpc=network.vpc,
             vpc_subnets=network.private_subnets_for(cfg.subnet_group),
             security_groups=[self.db_security_group],
+            parameter_group=self.db_parameter_group,
             multi_az=cfg.db_multi_az,
             allocated_storage=20,
             max_allocated_storage=100,
@@ -141,6 +169,48 @@ class DataStack(cdk.Stack):
             cloudwatch_logs_exports=["postgresql"],
             auto_minor_version_upgrade=True,
         )
+
+        cdk.CfnOutput(
+            self,
+            "DatabaseIdentifier",
+            value=self.database.instance_identifier,
+            description="What scripts/staging_power.py looks for by name - kept explicit here too so it need not be guessed at from the console.",
+        )
+
+    def _create_database_alarms(self, monitoring: MonitoringStack, cfg: EnvConfig) -> None:
+        """The two RDS failure modes that are silent until the database is down:
+        running out of storage, and a sustained CPU saturation that starves
+        every other connection. Both publish to the one shared alert topic."""
+        low_storage = self.database.metric_free_storage_space(
+            period=cdk.Duration.minutes(5)
+        ).create_alarm(
+            self,
+            "LowStorageAlarm",
+            alarm_name=f"{cfg.resource_prefix}-db-low-storage",
+            alarm_description=f"{cfg.name} database has under 2 GiB of free storage left.",
+            threshold=LOW_STORAGE_THRESHOLD_BYTES,
+            evaluation_periods=1,
+            comparison_operator=cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+            treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
+        )
+        low_storage.add_alarm_action(cw_actions.SnsAction(monitoring.alert_topic))
+
+        # 15 minutes as one period rather than three 5-minute evaluations: a
+        # single burst that trips and clears inside a few minutes is normal
+        # under real traffic, and is not what this alarm exists to catch.
+        high_cpu = self.database.metric_cpu_utilization(
+            period=cdk.Duration.minutes(15)
+        ).create_alarm(
+            self,
+            "HighCpuAlarm",
+            alarm_name=f"{cfg.resource_prefix}-db-high-cpu",
+            alarm_description=f"{cfg.name} database CPU over 90% for 15 minutes.",
+            threshold=90,
+            evaluation_periods=1,
+            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+            treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
+        )
+        high_cpu.add_alarm_action(cw_actions.SnsAction(monitoring.alert_topic))
 
     # --- product images ---
 
